@@ -5,27 +5,32 @@ from urllib.parse import quote_plus
 from PyQt5.QtCore import QUrl
 from PyQt5.QtWidgets import QApplication, QMainWindow, QToolBar, QAction, QLineEdit, QTabWidget
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage, QWebEngineProfile
-from flask import Flask, send_from_directory, make_response
+from flask import Flask, send_from_directory
 
 # --- 1. SETUP THE FLASK WEB SERVER ---
+# We are pointing to 'ui-react' and the 'build' folder you just created
 UI_BUILD_DIR = os.path.join(os.path.dirname(__file__), "ui-react", "build")
-PORT = 8080 
+PORT = 8080
 
-flask_app = Flask(__name__)
+flask_app = Flask(__name__, static_folder=os.path.join(UI_BUILD_DIR, 'assets'))
 
-# Route to serve the main index.html file
 @flask_app.route('/')
 def serve_index():
     return send_from_directory(UI_BUILD_DIR, 'index.html')
 
-# Route to serve all other static files (CSS, JS, images, etc.)
+@flask_app.route('/assets/<path:filename>')
+def serve_assets(filename):
+    return send_from_directory(os.path.join(UI_BUILD_DIR, 'assets'), filename)
+
+# Catch-all for other static files (like vite.svg or public folder items)
 @flask_app.route('/<path:filename>')
-def serve_static(filename):
+def serve_root_files(filename):
     return send_from_directory(UI_BUILD_DIR, filename)
 
 def start_server():
     print(f"Serving UI from http://localhost:{PORT}")
-    flask_app.run(port=PORT, debug=False)
+    print(f"Looking for files in: {UI_BUILD_DIR}")
+    flask_app.run(port=PORT, debug=False, threaded=True)
 
 server_thread = threading.Thread(target=start_server)
 server_thread.daemon = True
@@ -50,6 +55,7 @@ class MainWindow(QMainWindow):
         self.tabs.tabCloseRequested.connect(self.close_current_tab)
         self.tabs.currentChanged.connect(self.current_tab_changed)
         self.setCentralWidget(self.tabs)
+
         navtb = QToolBar("Navigation")
         self.addToolBar(navtb)
 
@@ -64,7 +70,8 @@ class MainWindow(QMainWindow):
         reload_btn = QAction("Reload", self)
         reload_btn.triggered.connect(self.reload_page)
         navtb.addAction(reload_btn)
-
+        
+        # Hard Reload button to fix any caching issues
         hard_reload_btn = QAction("Hard Reload", self)
         hard_reload_btn.triggered.connect(self.hard_reload_page)
         navtb.addAction(hard_reload_btn)
@@ -73,7 +80,7 @@ class MainWindow(QMainWindow):
         self.urlbar.returnPressed.connect(self.navigate_to_url)
         navtb.addWidget(self.urlbar)
         
-        add_tab_btn = QAction("New Tab", self)
+        add_tab_btn = QAction("+", self)
         add_tab_btn.triggered.connect(lambda: self.add_new_tab())
         navtb.addAction(add_tab_btn)
 
@@ -101,7 +108,8 @@ class MainWindow(QMainWindow):
         if browser: browser.page().action(QWebEnginePage.ReloadAndBypassCache).trigger()
 
     def add_new_tab(self, qurl=None, label="New Tab"):
-        if qurl is None: qurl = QUrl(f"http://localhost:{PORT}")
+        if qurl is None:
+            qurl = QUrl(f"http://localhost:{PORT}")
         browser = QWebEngineView()
         browser.setPage(WebEnginePage(browser))
         browser.setUrl(qurl)
@@ -120,13 +128,14 @@ class MainWindow(QMainWindow):
             self.update_url(qurl)
 
     def navigate_to_url(self):
-        browser = self.get_current_browser()
+        browser = self.tabs.currentWidget()
         if not browser: return
         text = self.urlbar.text()
-        if '.' not in text: q = QUrl("https://www.google.com/search?q=" + quote_plus(text))
+        if '.' not in text and ' ' in text:
+            q = QUrl("https://www.google.com/search?q=" + quote_plus(text))
         else:
+            if "://" not in text: text = "http://" + text
             q = QUrl(text)
-            if q.scheme() == "": q.setScheme("http")
         browser.setUrl(q)
 
     def update_url(self, q):
@@ -134,6 +143,7 @@ class MainWindow(QMainWindow):
         else: self.urlbar.setText(q.toString())
 
 # --- Main part of the script ---
+os.environ['QTWEBENGINE_REMOTE_DEBUGGING'] = "9333"
 app = QApplication(sys.argv)
 QWebEngineProfile.defaultProfile().clearHttpCache()
 QApplication.setApplicationName("Hindustan Browser")
